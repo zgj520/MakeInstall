@@ -1,5 +1,11 @@
 #include <string>
 #include <Windows.h>
+#include <codecvt>
+
+std::string wstring2String(const std::wstring& input_wstr) {
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+    return converter.to_bytes(input_wstr);
+}
 
 BOOL WriteFileData(HANDLE hFile, BYTE* buffer, DWORD dwSize) {
     DWORD dwNumWrited = 0;
@@ -110,7 +116,7 @@ BOOL WriteStartOffset(std::wstring outPath) {
     return TRUE;
 }
 
-BOOL MakePacket(std::wstring installExePath, std::wstring zipPath, std::wstring version) {
+BOOL MakePacket(std::wstring installExePath, std::wstring zipPath, std::wstring version, std::wstring exeFullName) {
     BOOL bRet = FALSE;
 
     // 记录安装程序本身的大小，使用的是PE的 TimeDateStamp
@@ -129,10 +135,20 @@ BOOL MakePacket(std::wstring installExePath, std::wstring zipPath, std::wstring 
         return FALSE;
     }
 
-    // 写入有几个包
+    auto exeName = wstring2String(exeFullName);
+
+    // 写入exe名称长
     ::SetFilePointer(hExePacket, 0, NULL, FILE_END);
-    WORD count = 1;
+    WORD count = exeName.length();
+    printf("exe name:%d, %d", count, sizeof(WORD));
     if (!WriteFileData(hExePacket, (BYTE*)&count, sizeof(count))) {
+        printf("Write pkg count error");
+        return FALSE;
+    }
+
+    // 写入名称
+    ::SetFilePointer(hExePacket, 0, NULL, FILE_END);
+    if (!WriteFileData(hExePacket, (BYTE*)exeName.c_str(), exeName.length())) {
         printf("Write pkg count error");
         return FALSE;
     }
@@ -174,10 +190,36 @@ int wmain(int argc, wchar_t* argv[]) {
     std::wstring strInstallContainer = argv[1];// 安装程序容器，带UI
     std::wstring binPath = argv[2]; // 需要安装的具体应用程序包
     std::wstring strversion = argv[3]; // 应用程序版本
-    std::wstring strExtend = argv[4]; // 扩展信息
-    if (!MakePacket(strInstallContainer, binPath, strversion)) {
+    std::wstring strExeName = argv[4]; // 启动exe的名称
+    std::wstring strOther = argv[5]; // 启动exe的名称
+    if (!MakePacket(strInstallContainer, binPath, strversion, strExeName)) {
         printf("MakePacket error");
         return -1;
     }
+    auto exeName = wstring2String(strExeName);
+    auto version = wstring2String(strversion);
+    auto oldFullPath = wstring2String(strInstallContainer);
+    auto index1 = oldFullPath.find_last_of("\\");
+    auto index2 = oldFullPath.find_last_of("/");
+    std::string otherInfo = wstring2String(strOther);
+    std::string newName = exeName + "_" + version;
+    if (!otherInfo.empty()) {
+        newName += "_" + otherInfo + ".exe";
+    }
+    else {
+        newName += ".exe";
+    }
+    std::string newPath = newName;
+    std::string dir = "";
+
+    if (index1 != std::string::npos) {
+        dir = oldFullPath.substr(0, index1);
+        newPath = dir + "\\" + newName;
+    }
+    else if (index2 != std::string::npos) {
+        dir = oldFullPath.substr(0, index2);
+        newPath = dir + "\\" + newName;
+    }
+    rename(oldFullPath.c_str(), newPath.c_str());
     return 0;
 }
